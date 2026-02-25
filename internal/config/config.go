@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	StoragePostgres = "postgresql"
-	StorageInMemory = "in_memory"
+	MaxCreateAttempts = 5
+	StoragePostgres   = "postgresql"
+	StorageInMemory   = "in_memory"
 )
 
 type Config struct {
