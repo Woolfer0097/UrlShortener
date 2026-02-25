@@ -1,7 +1,7 @@
 services:
   url-shortener:
     container_name: url-shortener
-    image: woolfer0097kek/url-shortener:1.0.0
+    image: woolfer0097kek/url-shortener:1.0.1
     env_file:
       - .env
     ports:
