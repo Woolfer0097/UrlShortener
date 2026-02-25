@@ -10,9 +10,9 @@ import (
 )
 
 type urlRepoAdapter struct {
-	mu           sync.RWMutex
-	inner        *inmemorylinks.UrlRepository
-	byOriginalUrl map[string]string // original URL -> code (for GetByOriginalUrl)
+	mu            sync.RWMutex
+	inner         *inmemorylinks.UrlRepository
+	byOriginalUrl map[string]string
 }
 
 func NewInMemoryLinksAdapter(inner *inmemorylinks.UrlRepository) UrlRepository {
@@ -20,17 +20,20 @@ func NewInMemoryLinksAdapter(inner *inmemorylinks.UrlRepository) UrlRepository {
 }
 
 func (a *urlRepoAdapter) Create(ctx context.Context, url *models.Url) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	u := &inmemorylinks.Url{
 		ID:          url.ID,
 		UrlCode:     url.UrlCode,
 		OriginalUrl: url.OriginalUrl,
 	}
+
 	if err := a.inner.Create(ctx, u); err != nil {
 		return err
 	}
-	a.mu.Lock()
+
 	a.byOriginalUrl[url.OriginalUrl] = url.UrlCode
-	a.mu.Unlock()
 	return nil
 }
 

@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 
+	"github.com/Woolfer0097/UrlShortener/internal/config"
 	"github.com/Woolfer0097/UrlShortener/internal/repository"
 	"github.com/Woolfer0097/UrlShortener/internal/repository/models"
 	"github.com/Woolfer0097/UrlShortener/internal/repository/schemas"
@@ -18,9 +20,13 @@ type ShortenerHandler struct {
 	BaseURL string
 }
 
+func isValidURL(url string) bool {
+	return len(url) <= 2048
+}
+
 func (h *ShortenerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req schemas.ShortenUrlRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OriginalUrl == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OriginalUrl == "" || !isValidURL(req.OriginalUrl) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -35,29 +41,37 @@ func (h *ShortenerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const maxCreateAttempts = 5
+	maxCreateAttempts := config.MaxCreateAttempts
 	baseURL := strings.TrimSuffix(h.BaseURL, "/")
-	for attempt := 0; attempt < maxCreateAttempts; attempt++ {
+	for attempt := 1; attempt <= maxCreateAttempts; attempt++ {
 		code := shortener.GenerateShortUrl(originalUrl)
 		existingByCode, err := h.UrlRepo.GetByCode(r.Context(), code)
 		if err == nil && existingByCode != nil {
 			if existingByCode.OriginalUrl == originalUrl {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(schemas.ShortenUrlResponse{ShortUrl: baseURL + "/" + code})
+				err = json.NewEncoder(w).Encode(schemas.ShortenUrlResponse{ShortUrl: baseURL + "/" + code})
+				if err != nil {
+					http.Error(w, "Shorten URL: Bad response format", http.StatusInternalServerError)
+					return
+				}
 				return
 			}
 			continue
 		}
 		url := &models.Url{UrlCode: code, OriginalUrl: originalUrl}
 		if err := h.UrlRepo.Create(r.Context(), url); err != nil {
-			if attempt == maxCreateAttempts-1 {
-				http.Error(w, "internal error", http.StatusInternalServerError)
+			if attempt == maxCreateAttempts {
+				http.Error(w, "Max attempts amount used and code hasn't been generated till now", http.StatusInternalServerError)
 				return
 			}
 			continue
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(schemas.ShortenUrlResponse{ShortUrl: baseURL + "/" + code})
+		err = json.NewEncoder(w).Encode(schemas.ShortenUrlResponse{ShortUrl: baseURL + "/" + code})
+		if err != nil {
+			http.Error(w, "Shorten URL: Bad response format", http.StatusInternalServerError)
+			return
+		}
 		return
 	}
 	http.Error(w, "internal error", http.StatusInternalServerError)
@@ -65,6 +79,11 @@ func (h *ShortenerHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *ShortenerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
+	re := regexp.MustCompile(`^[a-zA-Z0-9_]{10}$`)
+	if !re.MatchString(code) {
+		http.Error(w, "Invalid code format", http.StatusBadRequest)
+		return
+	}
 	if code == "" {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -79,9 +98,13 @@ func (h *ShortenerHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(
+	err = json.NewEncoder(w).Encode(
 		schemas.GetUrlResponse{
 			OriginalUrl: url.OriginalUrl,
 		},
 	)
+	if err != nil {
+		http.Error(w, "Get URL: Bad response format", http.StatusInternalServerError)
+		return
+	}
 }
